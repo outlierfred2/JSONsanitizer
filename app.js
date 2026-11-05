@@ -5,10 +5,11 @@ const status = document.querySelector('#status');
 let current;
 let entries = [];
 const rows = new Map();
+const collapsed = new Set();
 const search = document.querySelector('#search-values');
 const selected = new Map();
 const selection = document.querySelector('#selection');
-function resetSelection() { current = undefined; entries = []; rows.clear(); search.value = ''; selected.clear(); selection.hidden = true; document.querySelector('#tree').replaceChildren(); }
+function resetSelection() { current = undefined; entries = []; rows.clear(); collapsed.clear(); search.value = ''; selected.clear(); selection.hidden = true; document.querySelector('#tree').replaceChildren(); }
 function message(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
 input.addEventListener('input', () => { output.value = ''; resetSelection(); message(''); });
 document.querySelector('#sanitize').addEventListener('click', () => {
@@ -43,9 +44,14 @@ function updateCount() {
   let included = 0;
   for (const entry of entries) {
     const state = states.get(entry.key);
-    const { check } = rows.get(entry.key);
+    const { check, row, item, badge } = rows.get(entry.key);
     check.checked = state.checked;
     check.indeterminate = state.included && !state.checked;
+    row.classList.toggle('kept', state.checked);
+    row.classList.toggle('ancestor', state.included && !state.checked);
+    item.classList.toggle('included', state.included);
+    badge.textContent = state.checked ? 'Kept' : state.included ? 'Parent path' : '';
+    badge.hidden = !state.included;
     if (state.included) included++;
   }
   document.querySelector('#count').textContent = ` · ${included} included`;
@@ -53,7 +59,17 @@ function updateCount() {
 }
 function filterValues() {
   const visible = searchValues(entries, search.value);
-  for (const [key, { row }] of rows) row.hidden = !visible.has(key);
+  const searching = !!search.value.trim();
+  for (const [key, { item, children, toggle }] of rows) {
+    item.hidden = !visible.has(key);
+    if (children) {
+      const expanded = searching || !collapsed.has(key);
+      children.hidden = !expanded;
+      toggle.setAttribute('aria-expanded', String(expanded));
+      toggle.textContent = expanded ? '▾' : '▸';
+      toggle.disabled = searching;
+    }
+  }
   document.querySelector('#no-matches').hidden = visible.size > 0;
 }
 search.addEventListener('input', filterValues);
@@ -61,20 +77,37 @@ function renderValues() {
   selection.hidden = false;
   selected.clear();
   rows.clear();
+  collapsed.clear();
   search.value = '';
   entries = valueTree(current);
   document.querySelector('#path-fallback').hidden = true;
   const tree = document.querySelector('#tree'); tree.replaceChildren();
+  const rootList = document.createElement('ul'); rootList.className = 'tree-root'; tree.append(rootList);
   for (const entry of entries) {
     const { value, path, key } = entry;
     const container = value !== null && typeof value === 'object';
     const row = document.createElement('div'); row.className = 'value-row';
-    row.style.paddingLeft = `${Math.min(path.length, 8) * 14}px`;
+    const item = document.createElement('li'); item.className = 'tree-item';
+    const children = entry.children.length ? document.createElement('ul') : null;
+    if (children) { children.className = 'tree-children'; children.id = `branch-${rows.size}`; }
+    const toggle = document.createElement(children ? 'button' : 'span'); toggle.className = 'branch-toggle';
+    if (children) {
+      toggle.type = 'button';
+      toggle.setAttribute('aria-label', `Expand or collapse ${jsonPath(path)}`);
+      toggle.setAttribute('aria-controls', children.id);
+      toggle.addEventListener('click', () => {
+        if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+        filterValues();
+      });
+    } else toggle.setAttribute('aria-hidden', 'true');
     const label = document.createElement('label');
     const check = document.createElement('input'); check.type = 'checkbox';
-    rows.set(key, { row, check });
+    const badge = document.createElement('span'); badge.className = 'selection-badge'; badge.hidden = true;
+    rows.set(key, { row, check, item, children, toggle, badge });
+    check.setAttribute('aria-label', `Keep ${jsonPath(path)}`);
     check.addEventListener('change', () => { selectBranch(entry, selected, check.checked); updateCount(); });
-    const text = document.createElement('code'); text.textContent = jsonPath(path);
+    const text = document.createElement('code'); text.textContent = !path.length ? '$' : typeof path.at(-1) === 'number' ? `[${path.at(-1)}]` : JSON.stringify(path.at(-1));
+    text.title = jsonPath(path);
     const preview = document.createElement('small'); preview.textContent = container ? (Array.isArray(value) ? `Array (${value.length})` : 'Object') : JSON.stringify(value);
     label.append(check, text, preview);
     const copy = document.createElement('button'); copy.textContent = 'Copy path'; copy.setAttribute('aria-label', `Copy path ${jsonPath(path)}`);
@@ -83,11 +116,18 @@ function renderValues() {
       try { await navigator.clipboard.writeText(pathText); message('Path copied.'); }
       catch { const fallback = document.querySelector('#path-fallback'); fallback.hidden = false; fallback.value = pathText; fallback.focus(); fallback.select(); message('Path selected; use your keyboard to copy.', true); }
     });
-    row.append(label, copy); tree.append(row);
+    row.append(toggle, label, badge, copy); item.append(row);
+    if (children) item.append(children);
+    (entry.parent ? rows.get(entry.parent.key).children : rootList).append(item);
   }
   updateCount();
   filterValues();
 }
+document.querySelector('#expand-all').addEventListener('click', () => { collapsed.clear(); filterValues(); });
+document.querySelector('#collapse-all').addEventListener('click', () => {
+  for (const entry of entries) if (entry.parent && entry.children.length) collapsed.add(entry.key);
+  filterValues();
+});
 document.querySelector('#select-all').addEventListener('click', () => {
   selectBranch(entries[0], selected, true);
   updateCount();
