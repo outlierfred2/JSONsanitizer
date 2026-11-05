@@ -8,10 +8,6 @@ Browser-only; no dependencies or stored input.
 
 Keys remain unchanged and may contain sensitive information.
 
-## GitHub Pages
-
-Push to `main`. In **Settings → Pages**, choose **GitHub Actions**, then run **Deploy GitHub Pages**. Change the workflow branch if needed.
-
 ## Local use
 
 Run `python3 -m http.server 8000` and open http://localhost:8000.
