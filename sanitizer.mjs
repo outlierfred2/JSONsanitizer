@@ -64,13 +64,33 @@ export function valueTree(value) {
   return entries;
 }
 
+// Track which explicit selections include each leaf so parent toggles do not
+// erase choices made independently on descendants.
+const selectionSources = new WeakMap();
 export function selectBranch(entry, selected, keep) {
+  let sources = selectionSources.get(selected);
+  if (!sources) { sources = new Map(); selectionSources.set(selected, sources); }
+  for (const key of sources.keys()) if (!selected.has(key)) sources.delete(key);
+  for (const key of selected.keys()) if (!sources.has(key)) sources.set(key, new Set([key]));
+  const ancestors = new Set();
+  for (let node = entry; node; node = node.parent) ancestors.add(node.key);
   const pending = [entry];
   while (pending.length) {
     const node = pending.pop();
-    if (node.children.length) pending.push(...node.children);
-    else if (keep) selected.set(node.key, node.path);
-    else selected.delete(node.key);
+    if (node.children.length) {
+      for (const child of node.children) pending.push(child);
+      continue;
+    }
+    const origins = sources.get(node.key) || new Set();
+    if (keep) origins.add(entry.key);
+    else for (const origin of origins) if (ancestors.has(origin)) origins.delete(origin);
+    if (origins.size) {
+      sources.set(node.key, origins);
+      selected.set(node.key, node.path);
+    } else {
+      sources.delete(node.key);
+      selected.delete(node.key);
+    }
   }
 }
 

@@ -43,8 +43,7 @@ test('child selections include upstream branches without retaining siblings', ()
  assert.deepEqual(states.get('["task","params"]'), {checked:true, included:true});
  assert.deepEqual(retainPaths(value, [...selected.values()]), {task:{params:{id:0}}});
  selectBranch(entries.find(e => e.key === '["task"]'), selected, false);
- assert.equal(selected.size, 0);
- assert.equal(selectionStates(entries, selected).get('[]').included, false);
+ assert.deepEqual(retainPaths(value, [...selected.values()]), {task:{params:{id:0}}});
 });
 test('whole branch selection permits deselecting one child', () => {
  const value = {a:{x:0,y:0}, empty:[], nothing:null};
@@ -64,4 +63,32 @@ test('search matches dotted paths and values, keeps ancestors, and preserves sel
  assert.equal(searchValues(entries, 'no matches').size, 0);
  assert.equal(searchValues(entries, '').size, entries.length);
  assert.deepEqual([...selected.values()], [['other']]);
+});
+
+test('parent on/off preserves an earlier child selection and removes only parent additions', () => {
+ const value = {item1:{item2:0, other:0}, outside:false};
+ const entries = valueTree(value), selected = new Map();
+ const parent = entries.find(e => e.key === '["item1"]');
+ const child = entries.find(e => e.key === '["item1","item2"]');
+ selectBranch(child, selected, true);
+ selectBranch(parent, selected, true);
+ assert.deepEqual(retainPaths(value, [...selected.values()]), {item1:{item2:0,other:0}});
+ selectBranch(parent, selected, false);
+ assert.deepEqual(retainPaths(value, [...selected.values()]), {item1:{item2:0}});
+ assert.deepEqual(selectionStates(entries, selected).get(parent.key), {checked:false,included:true});
+ selectBranch(child, selected, false);
+ assert.equal(selected.size, 0);
+});
+test('independent nested branch selections survive root toggles and clear resets history', () => {
+ const value = {a:{x:0,y:0},b:0};
+ const entries = valueTree(value), selected = new Map();
+ const branch = entries.find(e => e.key === '["a"]');
+ selectBranch(branch, selected, true);
+ selectBranch(entries[0], selected, true);
+ selectBranch(entries[0], selected, false);
+ assert.deepEqual(retainPaths(value, [...selected.values()]), {a:{x:0,y:0}});
+ selected.clear();
+ selectBranch(entries[0], selected, true);
+ selectBranch(entries[0], selected, false);
+ assert.equal(selected.size, 0);
 });
