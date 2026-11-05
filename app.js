@@ -1,11 +1,14 @@
-import { sanitize, retainPaths, jsonPath } from './sanitizer.mjs';
+import { sanitize, retainPaths, jsonPath, valueTree, selectBranch, selectionStates, searchValues } from './sanitizer.mjs';
 const input = document.querySelector('#input');
 const output = document.querySelector('#output');
 const status = document.querySelector('#status');
 let current;
+let entries = [];
+const rows = new Map();
+const search = document.querySelector('#search-values');
 const selected = new Map();
 const selection = document.querySelector('#selection');
-function resetSelection() { current = undefined; selected.clear(); selection.hidden = true; document.querySelector('#tree').replaceChildren(); }
+function resetSelection() { current = undefined; entries = []; rows.clear(); search.value = ''; selected.clear(); selection.hidden = true; document.querySelector('#tree').replaceChildren(); }
 function message(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
 input.addEventListener('input', () => { output.value = ''; resetSelection(); message(''); });
 document.querySelector('#sanitize').addEventListener('click', () => {
@@ -36,24 +39,41 @@ document.querySelector('#download').addEventListener('click', () => {
 });
 
 function updateCount() {
-  document.querySelector('#count').textContent = ` · ${selected.size} selected`;
+  const states = selectionStates(entries, selected);
+  let included = 0;
+  for (const entry of entries) {
+    const state = states.get(entry.key);
+    const { check } = rows.get(entry.key);
+    check.checked = state.checked;
+    check.indeterminate = state.included && !state.checked;
+    if (state.included) included++;
+  }
+  document.querySelector('#count').textContent = ` · ${included} included`;
   document.querySelector('#trim').disabled = !selected.size;
 }
+function filterValues() {
+  const visible = searchValues(entries, search.value);
+  for (const [key, { row }] of rows) row.hidden = !visible.has(key);
+  document.querySelector('#no-matches').hidden = visible.size > 0;
+}
+search.addEventListener('input', filterValues);
 function renderValues() {
   selection.hidden = false;
   selected.clear();
+  rows.clear();
+  search.value = '';
+  entries = valueTree(current);
   document.querySelector('#path-fallback').hidden = true;
   const tree = document.querySelector('#tree'); tree.replaceChildren();
-  const pending = [[current, []]];
-  while (pending.length) {
-    const [value, path] = pending.pop();
+  for (const entry of entries) {
+    const { value, path, key } = entry;
     const container = value !== null && typeof value === 'object';
     const row = document.createElement('div'); row.className = 'value-row';
     row.style.paddingLeft = `${Math.min(path.length, 8) * 14}px`;
     const label = document.createElement('label');
     const check = document.createElement('input'); check.type = 'checkbox';
-    const key = JSON.stringify(path);
-    check.addEventListener('change', () => { if (check.checked) selected.set(key, path); else selected.delete(key); updateCount(); });
+    rows.set(key, { row, check });
+    check.addEventListener('change', () => { selectBranch(entry, selected, check.checked); updateCount(); });
     const text = document.createElement('code'); text.textContent = jsonPath(path);
     const preview = document.createElement('small'); preview.textContent = container ? (Array.isArray(value) ? `Array (${value.length})` : 'Object') : JSON.stringify(value);
     label.append(check, text, preview);
@@ -64,18 +84,17 @@ function renderValues() {
       catch { const fallback = document.querySelector('#path-fallback'); fallback.hidden = false; fallback.value = pathText; fallback.focus(); fallback.select(); message('Path selected; use your keyboard to copy.', true); }
     });
     row.append(label, copy); tree.append(row);
-    if (container) {
-      const keys = Object.keys(value);
-      for (let i = keys.length - 1; i >= 0; i--) { const key = keys[i]; pending.push([value[key], [...path, Array.isArray(value) ? Number(key) : key]]); }
-    }
   }
   updateCount();
+  filterValues();
 }
 document.querySelector('#select-all').addEventListener('click', () => {
-  document.querySelectorAll('#tree input').forEach(check => { if (!check.checked) check.click(); });
+  selectBranch(entries[0], selected, true);
+  updateCount();
 });
 document.querySelector('#select-none').addEventListener('click', () => {
-  document.querySelectorAll('#tree input').forEach(check => { if (check.checked) check.click(); });
+  selected.clear();
+  updateCount();
 });
 document.querySelector('#trim').addEventListener('click', () => {
   try {

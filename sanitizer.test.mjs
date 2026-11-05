@@ -31,3 +31,37 @@ test('paths quote special keys and distinguish numeric keys from indexes', () =>
  const value = JSON.parse('{"__proto__":{"x":0,"y":0}}');
  assert.equal(JSON.stringify(retainPaths(value,[['__proto__','x']])), '{"__proto__":{"x":0}}');
 });
+
+import { valueTree, selectBranch, selectionStates, searchValues } from './sanitizer.mjs';
+test('child selections include upstream branches without retaining siblings', () => {
+ const value = {task:{params:{id:0}, secret:'string'}, other:false};
+ const entries = valueTree(value), selected = new Map();
+ selectBranch(entries.find(e => e.key === '["task","params","id"]'), selected, true);
+ const states = selectionStates(entries, selected);
+ assert.deepEqual(states.get('["task"]'), {checked:false, included:true});
+ assert.deepEqual(states.get('[]'), {checked:false, included:true});
+ assert.deepEqual(states.get('["task","params"]'), {checked:true, included:true});
+ assert.deepEqual(retainPaths(value, [...selected.values()]), {task:{params:{id:0}}});
+ selectBranch(entries.find(e => e.key === '["task"]'), selected, false);
+ assert.equal(selected.size, 0);
+ assert.equal(selectionStates(entries, selected).get('[]').included, false);
+});
+test('whole branch selection permits deselecting one child', () => {
+ const value = {a:{x:0,y:0}, empty:[], nothing:null};
+ const entries = valueTree(value), selected = new Map();
+ selectBranch(entries[0], selected, true);
+ assert.equal(selectionStates(entries, selected).get('[]').checked, true);
+ selectBranch(entries.find(e => e.key === '["a","x"]'), selected, false);
+ assert.deepEqual(retainPaths(value, [...selected.values()]), {a:{y:0},empty:[],nothing:null});
+});
+test('search matches dotted paths and values, keeps ancestors, and preserves selection', () => {
+ const entries = valueTree({task:{params:{id:0}, name:'string'}, other:false});
+ const selected = new Map();
+ selectBranch(entries.find(e => e.key === '["other"]'), selected, true);
+ const visible = searchValues(entries, ' TASK.PARAMS ');
+ assert.deepEqual([...visible].sort(), ['[]','["task"]','["task","params"]','["task","params","id"]'].sort());
+ assert.ok(searchValues(entries, 'false').has('["other"]'));
+ assert.equal(searchValues(entries, 'no matches').size, 0);
+ assert.equal(searchValues(entries, '').size, entries.length);
+ assert.deepEqual([...selected.values()], [['other']]);
+});
